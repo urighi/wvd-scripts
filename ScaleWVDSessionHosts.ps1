@@ -286,6 +286,7 @@ function Start-PeakProcedure ($HostPoolInfo, $SessionHosts) {
             break
         }
         $RunningCores = Measure-RunningCores $SessionHosts
+        $SessionLimit = $RunningCores * $SessionThresholdPerCPU
     }
  }
 
