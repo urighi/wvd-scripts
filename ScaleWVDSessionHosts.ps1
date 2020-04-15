@@ -1,16 +1,16 @@
 <#
 .SYNOPSIS
-newScale.ps1
+ScaleWVDSessionHosts.ps1
 .NOTES
 Written by Ulisses Righi
 ulisses@righisoft.com.br
-Version 1.0 2/1/2020
+Version 1.1 3/16/2020
 #>
 
 #region Paths
 $CurrentPath = Split-Path $script:MyInvocation.MyCommand.Path
 $JsonPath = "$CurrentPath\Config.Json"
-$WVDTenantLog = "$CurrentPath\WVDTenantScale.log"
+$WVDTenantLog = "$CurrentPath\ScaleWVDSessionHosts.log"
 $Global:KeyPath = $CurrentPath
 
 #endregion
@@ -30,7 +30,7 @@ function Set-ScriptVariable ($Name, $Value) {
   function Import-Json ($JsonPath) {
     if (Test-Path $JsonPath) {
         try {
-            $Variable = Get-Content $JsonPath | Out-String | ConvertFrom-Json
+            $Configuration = Get-Content $JsonPath | Out-String | ConvertFrom-Json
         }
         catch {
             Write-Log "Invalid JSON Syntax on file $JsonPath." -Category Error
@@ -42,15 +42,17 @@ function Set-ScriptVariable ($Name, $Value) {
         exit 1
     }
     # Loads JSON settings into variables on the Script scope
-    $Variable = Get-Content $JsonPath | Out-String | ConvertFrom-Json
-    $Variable.WVDScale.Azure | ForEach-Object { $_.Variable } | Where-Object { $null -ne $_.Name } | `
-        ForEach-Object { Set-ScriptVariable -Name $_.Name -Value $_.Value }
-    $Variable.WVDScale.WVDScaleSettings | ForEach-Object { $_.Variable } | Where-Object { $null -ne $_.Name } | `
-        ForEach-Object { Set-ScriptVariable -Name $_.Name -Value $_.Value }
-    $Variable.WVDScale.Deployment | ForEach-Object { $_.Variable } | Where-Object { $null -ne $_.Name } | `
-        ForEach-Object { Set-ScriptVariable -Name $_.Name -Value $_.Value }
 
-    $Script:OffPeakDays = $Script:OffPeakDays.Split(',')
+    $Configuration.WVDScale.Azure | Where-Object { $null -ne $_.Name } | `
+        ForEach-Object { Set-ScriptVariable -Name $_.Name -Value $_.Value }
+    $Configuration.WVDScale.WVDScaleSettings | Where-Object { $null -ne $_.Name } | `
+        ForEach-Object { Set-ScriptVariable -Name $_.Name -Value $_.Value }
+    $Configuration.WVDScale.Deployment | Where-Object { $null -ne $_.Name } | `
+        ForEach-Object { Set-ScriptVariable -Name $_.Name -Value $_.Value }
+    $Configuration.WVDScale.ConnectionMonitor | Where-Object { $null -ne $_.Name } | `
+        ForEach-Object { Set-ScriptVariable -Name $_.Name -Value $_.Value }
+    
+    $Script:OffPeakDays = $Script:OffPeakDays.Split(",")
 }
 
 #region LoggingFunctions
@@ -81,28 +83,79 @@ function Assert-PeakHours {
     return $false
 
 }
+# Ensures that online session hosts are made available if not in maintenance mode
+# and vice-versa.
+function Assert-SessionHostStatus ($SessionHosts) {
+    foreach ($SessionHost in $SessionHosts) {
+        $AzResource = Get-AzResource -Name $SessionHost.SessionHostName.Split(".")[0]
+        $Tags = $AzResource.Tags
+
+        # Checks if a session host should stop waiting for new connections after the 
+        # time limit has elapsed.
+        if ($Tags.UserConnectionRequested -eq "true" -and $null -ne $Tags.UserConnectionRequestDate) {
+            $ConnectionRequestDateTime = Get-Date $Tags.UserConnectionRequestDate
+            if ($ConnectionRequestDateTime.AddMinutes($ConnectionRequestTimeLimit) -lt (Get-Date))
+            {
+                Write-Log -Message "Connection request time limit for $($SessionHost.SessionHostName) has elapsed." -Category Warning
+                $Tags.UserConnectionRequested = "false"
+                $Tags.UserConnectionRequestDate = ""
+                $AzResource | Set-AzResource -Tag $Tags -Force
+            }
+            else {
+                Write-Log "$($SessionHost.SessionHostName) is is waiting mode." -Category Information
+            }
+        }
+
+        if ($Tags.$MaintenanceTagName -eq "true" -or
+            $SessionHost.Status -eq "NoHeartbeat") {
+                Write-Log -Message `
+                "Host $($SessionHost.SessionHostName) is offline or in maintenance mode. Setting it to not allow new sessions." -Category Warning
+                Set-RdsSessionHost -TenantName $TenantName -HostPoolName $HostPoolName `
+                -SessionHostName $SessionHost.SessionHostName -AllowNewSession $false | Out-Null
+        }
+        else {
+            Write-Log -Message `
+                "Host $($SessionHost.SessionHostName) is available. Setting it to allow new sessions." -Category Information
+            Set-RdsSessionHost -TenantName $TenantName -HostPoolName $HostPoolName `
+            -SessionHostName $SessionHost.SessionHostName -AllowNewSession $true | Out-Null
+        }
+    }
+}
 
 # Gets the total number of cores running, which is used
 # for calculating the number of sessions per host.
-function Measure-RunningCores ($SessionHosts) {
+function Measure-AvailableCores ($SessionHosts) {
     $TotalRunningCores = 0
+    $TotalAvailableCores = 0
     $AvailableSessionHosts = $SessionHosts | Where-Object `
-        { $_.Status -eq "Available" -and $_.AllowNewSession -eq "True" }
+        { $_.Status -eq "Available" }
     foreach ($SessionHost in $AvailableSessionHosts) {
         # Finds the Azure VMs and counts the number of cores
-        $TotalRunningCores += (Get-SessionHostVMInfo $SessionHost).NumberOfCores
+        $TotalRunningCores += (Get-SessionHostVMSizeInfo $SessionHost).NumberOfCores
+        if ($SessionHost.AllowNewSession -and
+            (Get-SessionHostVMTags $SessionHost).$MaintenanceTagName -ne "true") {
+            $TotalAvailableCores += (Get-SessionHostVMSizeInfo $SessionHost).NumberOfCores
+        }
     }
     Write-Log -Message "Found $TotalRunningCores running cores." -Category Information
-    return $TotalRunningCores
+    Write-Log -Message "Found $TotalAvailableCores available cores." -Category Information
+    return $TotalAvailableCores
 }
 
 # Gets the VM size information from Azure
-function Get-SessionHostVMInfo ($SessionHost) {
+function Get-SessionHostVMSizeInfo ($SessionHost) {
     $VMName = $SessionHost.SessionHostName.Split(".")[0]
     $VMInfo = Get-AzVM -Status | Where-Object { $_.Name -eq $VMName }
     $RoleSize = Get-AzVMSize -Location $VMInfo.Location | `
         Where-Object { $_.Name -eq $VMInfo.HardwareProfile.VmSize }
     return $RoleSize
+}
+
+# Gets the VM tags from Azure
+function Get-SessionHostVMTags ($SessionHost) {
+    $VMName = $SessionHost.SessionHostName.Split(".")[0]
+    $VMInfo = Get-AzResource -Name $VMName
+    return $VMInfo.Tags
 }
 
 function Start-SessionHost ($SessionHost) {
@@ -117,8 +170,12 @@ function Start-SessionHost ($SessionHost) {
             if ($VmInfo.PowerState -eq "VM running" -and $VmInfo.ProvisioningState -eq "Succeeded"){
                 $IsVMRunning = $true
             }
+            elseif ($VMInfo.PowerState -eq "Failed")
+            {
+                throw "Azure VM is in a failed state."
+            }
             else {
-                Get-AzVM | Where-Object { $_.Name -eq $VMName } | Start-AzVM | Out-Null
+                Get-AzVM | Where-Object { $_.Name -eq $VMName } | Start-AzVM
                 Start-Sleep -Seconds 10
             }
         }
@@ -127,7 +184,6 @@ function Start-SessionHost ($SessionHost) {
         Write-Log -Message "Error while starting session host.`r`n $($_.Exception.Message)" -Category Error
     }
     try {
-        # Sets the session host to allow new sessions
         Set-RdsSessionHost -TenantName $TenantName -HostPoolName $HostPoolName `
             -SessionHostName $SessionHost.SessionHostName -AllowNewSession $true | Out-Null
     }
@@ -181,12 +237,19 @@ function Stop-SessionHost ($UserSessions, $SessionHost) {
 # Off-peak procedure: if the number of active session hosts is above the minimum
 # number of hosts, shuts down session hosts with the least amount of sessions,
 # warning users before logging them off.
-function Start-OffPeakProcedure ($HostPoolInfo, $SessionHosts) {
+function Start-OffPeakProcedure ($HostPoolInfo) {
     # Sets host pool to depth first mode
     Set-RdsHostPool -TenantName $HostPoolInfo.TenantName -Name $HostPoolInfo.HostPoolName `
         -DepthFirstLoadBalancer:$true -MaxSessionLimit 99999 | Out-Null
-    # Checks available session hosts, including those that do not allow new sessions
-    $AvailableSessionHosts = $SessionHosts | Where-Object { $_.Status -eq "Available" }
+    
+    # Checks available session hosts, including those that do not allow new sessions,
+    # except session hosts in maintenance mode and session hosts waiting for a user
+    # connection (from the MonitorUserconnections.ps1 script)
+
+    $AvailableSessionHosts = Get-RdsSessionHost -TenantName $HostPoolInfo.TenantName `
+        -HostPoolName $HostPoolInfo.HostPoolName | Where-Object { $_.Status -eq "Available" -and 
+        ((Get-SessionHostVMTags $_).$MaintenanceTagName -ne "true") -and
+        ((Get-SessionHostVMTags $_).UserConnectionRequested -ne "true")}
 
     Write-Log -Message "Number of available hosts: $($AvailableSessionHosts.Count)." -Category Information
     while ($AvailableSessionHosts.Count -gt $MinimumNumberOfRDSH){
@@ -207,7 +270,8 @@ function Start-OffPeakProcedure ($HostPoolInfo, $SessionHosts) {
             }
         }
         
-        # Skips shutting down last session host if there are any sessions
+        # If the minimum number of servers is 0, skips shutting
+        # down last session host if there are any sessions
         if ($AvailableSessionHosts.Count -eq 1 `
             -and $MinimumNumberOfRDSH -eq "0" `
             -and $UserSessions.Count -gt 0) {
@@ -226,7 +290,7 @@ function Start-OffPeakProcedure ($HostPoolInfo, $SessionHosts) {
     
         foreach ($Candidate in $Candidates)
         {
-            Set-RdsSessionHost -TenantName $HostPoolInfo.TenantName -Name $HostPoolInfo.HostPoolName `
+            Set-RdsSessionHost -TenantName $HostPoolInfo.TenantName -HostPoolName $HostPoolInfo.HostPoolName `
                 -Name $Candidate.SessionHostName -AllowNewSession $false
         }
 
@@ -236,19 +300,19 @@ function Start-OffPeakProcedure ($HostPoolInfo, $SessionHosts) {
         # to allow the service to update the heartbeat
         Start-Sleep -Seconds 30
 
-        # Updates session hosts information
-        $SessionHosts = Get-RdsSessionHost -TenantName $TenantName -HostPoolName $HostpoolName
         # Updates number of running hosts
-        $AvailableSessionHosts = $SessionHosts | Where-Object { $_.Status -eq "Available" }
-
+        $AvailableSessionHosts = Get-RdsSessionHost -TenantName $HostPoolInfo.TenantName `
+            -HostPoolName $HostPoolInfo.HostPoolName | Where-Object { $_.Status -eq "Available" -and 
+            ((Get-SessionHostVMTags $_).$MaintenanceTagName -ne "true") -and
+            ((Get-SessionHostVMTags $_).UserConnectionRequested -ne "true")}
     }
     
     $Message = "No more hosts to shut down. Hosts available: $($AvailableSessionHosts.Count). " + `
     "Minimum number of hosts: $MinimumNumberOfRDSH."
     Write-Log -Message $Message -Category Information
 
-    $NumberOfSessions = ($SessionHosts.Sessions | Measure-Object -Sum).Sum
-    $SessionLimit = (Measure-RunningCores $SessionHosts) * $SessionThresholdPerCPU
+    $NumberOfSessions = ($AvailableSessionHosts.Sessions | Measure-Object -Sum).Sum
+    $SessionLimit = (Measure-AvailableCores $AvailableSessionHosts) * $SessionThresholdPerCPU
 
     if ($NumberOfSessions -gt $SessionLimit)
     {
@@ -263,33 +327,46 @@ function Start-OffPeakProcedure ($HostPoolInfo, $SessionHosts) {
 # starts session hosts as needed. Sets the host pool to BreadthFirst
 # to better distribute resources. If no session hosts are running,
 # starts a session host.
-function Start-PeakProcedure ($HostPoolInfo, $SessionHosts) {
-    # Sets host pool to breadth first mode
-    Set-RdsHostPool -TenantName $HostPoolInfo.TenantName -Name $HostPoolInfo.HostPoolName `
-        -BreadthFirstLoadBalancer | Out-Null
+function Start-PeakProcedure ($HostPoolInfo) {
+
+    $SessionHosts = Get-RdsSessionHost -TenantName $HostPoolInfo.TenantName `
+        -HostPoolName $HostPoolInfo.HostpoolName | `
+        Where-Object { (Get-SessionHostVMTags $_).$MaintenanceTagName -ne "true" }
     # Checks current number of sessions and compares it to the threshold
     $NumberOfSessions = ($SessionHosts.Sessions | Measure-Object -Sum).Sum
-    $RunningCores = Measure-RunningCores $SessionHosts
-    $SessionLimit = $RunningCores * $SessionThresholdPerCPU
+    $AvailableCores = Measure-AvailableCores $SessionHosts
+    $SessionLimit = $AvailableCores * $SessionThresholdPerCPU
+
+    # Sets host pool to breadth first mode
+    Set-RdsHostPool -TenantName $HostPoolInfo.TenantName -Name $HostPoolInfo.HostPoolName `
+        -BreadthFirstLoadBalancer -MaxSessionLimit $MaximumNumberOfSessions | Out-Null
 
     Write-Log -Message "Found $NumberOfSessions open sessions." -Category Information
 
-    while (($NumberOfSessions -gt $SessionLimit) -or ($RunningCores -eq 0))
+    while (($NumberOfSessions -gt $SessionLimit) -or ($AvailableCores -eq 0))
     {
         # Finds offline session hosts and starts them
-        $SessionHost = $SessionHosts | Where-Object { $_.Status -eq "NoHeartbeat" -or $false -eq $_.AllowNewSession } | Select-Object -First 1
-        if ($SessionHost) {
+        $SessionHost = $SessionHosts | Where-Object { $_.Status -eq "NoHeartbeat" -and 
+            (Get-SessionHostVMTags $_).$MaintenanceTagName -ne "true" } | Select-Object -First 1
+        if ($null -ne $SessionHost) {
             Start-SessionHost $SessionHost
         }
         else {
             Write-Log "Session threshold is above limit, but there are no hosts to start." Warning
             break
         }
-        $RunningCores = Measure-RunningCores $SessionHosts
-        $SessionLimit = $RunningCores * $SessionThresholdPerCPU
+
+        $SessionHosts = Get-RdsSessionHost -TenantName $HostPoolInfo.TenantName `
+            -HostPoolName $HostPoolInfo.HostpoolName | `
+            Where-Object { (Get-SessionHostVMTags $_).$MaintenanceTagName -ne "true" }
+        $AvailableCores = Measure-AvailableCores $SessionHosts
+        $SessionLimit = $AvailableCores * $SessionThresholdPerCPU
     }
  }
 
+ #endregion
+
+ #region Main
 function Main {
 
     Write-Log -Message "Starting WVD session host scaling script." -Category Information
@@ -341,32 +418,30 @@ function Main {
         exit 1
     }
     
+    Assert-SessionHostStatus $AllSessionHosts
+
     if (Assert-PeakHours) {
         Write-Log -Message "Host pool is in peak hours. Starting peak procedure." -Category Information
-        Start-PeakProcedure $HostPoolInfo $AllSessionHosts
+        Start-PeakProcedure $HostPoolInfo
         Write-Log -Message "Completed peak procedure." -Category Information
     }
     else {
         Write-Log -Message "Host pool is in off-peak hours. Starting off-peak procedure." -Category Information
-        Start-OffPeakProcedure $HostPoolInfo $AllSessionHosts
+        Start-OffPeakProcedure $HostPoolInfo
         Write-Log -Message "Completed off-peak procedure." -Category Information
     }
 }
 
-#endregion
-
-#region Main
 $WVDModule = Get-InstalledModule -Name "Microsoft.RDInfra.RDPowershell" -ErrorAction SilentlyContinue
 if (!$WVDModule) {
-  Write-Log "WVD module not found. Please install the module by running Install-Module Microsoft.RDInfra.RDPowershell -AllowClobber'"
+  Write-Log "WVD module not found. Please install the module by running Install-Module Microsoft.RDInfra.RDPowershell -AllowClobber'" -Category Error
 }
 $AzModule = Get-InstalledModule -Name "Az" -ErrorAction SilentlyContinue
 if (!$AzModule) {
-  Write-Log "Azure module not found. Please install the module by running Install-Module Az -AllowClobber'"
+  Write-Log "Azure module not found. Please install the module by running Install-Module Az -AllowClobber'" -Category Error
 }
 
-if ($AzModule -and $WVDModule)
-{
+if ($AzModule -and $WVDModule) {
     Import-Module "Microsoft.RDInfra.RDPowershell"
     Import-Module "Az"
     Main

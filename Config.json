@@ -1,0 +1,157 @@
+{
+	"WVDScale": {
+		"Azure": [
+				{
+					"_Comments": "Azure Active Directory tenant ID",
+					"Name": "AADTenantId",
+					"Value": "0000000-0000-0000-0000-000000000000"
+				},
+				{
+					"_Comments": "Azure Service Principal GUID or Username - register credentials with the Functions-PSStoredCredentials.ps1 script",
+					"Name": "AADApplicationId",
+					"Value": "admin@tenant.com"
+				},
+				{
+					"_Comments": "Azure Subscription Id",
+					"Name": "currentAzureSubscriptionId",
+					"Value": "00000000-0000-0000-0000-000000000000"
+				},
+				{
+					"_Comments": "Tenant group name in the RDS deployment - normally 'Default Tenant Group'",
+					"Name": "tenantGroupName",
+					"Value": "Default Tenant Group"
+				},
+				{
+					"_Comments": "Tenant name in the RDS deployment.",
+					"Name": "tenantName",
+					"Value": "Tenant"
+				},
+				{
+					"_Comments": "RDS host pool name",
+					"Name": "hostPoolName",
+					"Value": "Host Pool"
+				},
+				{
+					"_Comments": "Azure Maintenance tag name -  script will ignore any servers with the maintenance tag set",
+					"Name": "maintenanceTagName",
+					"Value": "MaintenanceMode"
+				}
+			],
+		"Deployment": [
+				{
+					"_Comments": "RDbroker URL",
+					"Name": "rdBroker",
+					"Value": "https://rdbroker.wvd.microsoft.com"
+				},
+				{
+					"_Comments": "Username or WVD service Principal GUID - register credentials with the Functions-PSStoredCredentials.ps1 script",
+					"Name": "userName",
+					"Value": "00000000-0000-0000-0000-0000000000007"
+				},
+				{
+					"_Comments": "Indicates if a service principal is being used to authenticate to WVD. Values: True / False",
+					"Name": "isServicePrincipal",
+					"Value": "True"
+				}
+			],
+		"WVDScaleSettings": [
+				{
+					"_Comments": "Peak usage time start (server local time, 24h format)",
+					"Name": "beginPeakTime",
+					"Value": "08:00:00"
+				},
+				{
+					"_Comments": "Peak usage time end (server local time, 24h format)",
+					"Name": "endPeakTime",
+					"Value": "19:00:00"
+				},
+				{
+					"_Comments": "Days when the script will always be in off-peak mode",
+					"Name": "offPeakDays",
+					"Value": "Saturday,Sunday"
+				},
+				{
+					"_Comments": "Maximum number of sessions per CPU. If above the threshold, the script will start a new session host.",
+					"Name": "sessionThresholdPerCPU",
+					"Value": "0.95"
+				},
+				{
+					"_Comments": "Minimum number of host pool VMs to keep running during off-peak usage time. If set to 0, will shut down all servers without connected sessions.",
+					"Name": "minimumNumberOfRDSH",
+					"Value": "1"
+				},
+				{
+					"_Comments": "Maximum number of sessions per host (used on BreadthFirst mode).",
+					"Name": "maximumNumberOfSessions",
+					"Value": "9"
+				},
+				{
+					"_Comments": "Number of seconds to wait before forcing users to logoff.",
+					"Name": "limitSecondsToForceLogOffUser",
+					"Value": "120"
+				},
+				{
+					"_Comments": "Title of the message sent to users before forcing logoff",
+					"Name": "logOffMessageTitle",
+					"Value": "Resource optimization in progress"
+				},
+				{
+					"_Comments": "Body of the message sent to users before forcing logoff",
+					"Name": "logOffMessageBody",
+					"Value": "This session host will shut down in 2 minutes. Please save your work and log off."
+				}
+			],
+		"ConnectionMonitor": [
+				{
+					"_Comments": "SMTP server for user alerts",
+					"Name": "smtpServer",
+					"Value": "smtp.office365.com"
+				},
+				{
+					"_Comments": "SMTP server port",
+					"Name": "smtpServerPort",
+					"Value": "587"
+				},
+				{
+					"_Comments": "E-mail address for user alerts",
+					"Name": "emailAddress",
+					"Value": "wvd@domain.com"
+				},
+				{
+					"_Comments": "E-mail subject for server available alerts",
+					"Name": "emailSubjectAvailable",
+					"Value": "Your virtual desktop is ready"
+				},
+				{
+					"_Comments": "E-mail body for server available alerts",
+					"Name": "emailBodyAvailable",
+					"Value": "Your virtual desktop is ready. Please try to log in to your virtual desktop again."
+				},
+				{
+					"_Comments": "E-mail subject for server available alerts",
+					"Name": "emailSubjectAcknowledged",
+					"Value": "We are preparing your virtual desktop"
+				},
+				{
+					"_Comments": "E-mail body for server available alerts",
+					"Name": "emailBodyAcknowledged",
+					"Value": "Your virtual desktop will be available within 5 minutes. We will send you an e-mail when it is ready. Please reach out to support@enstep.com if you have any issues."
+				},
+				{
+					"_Comments": "E-mail subject for other errors and alerts",
+					"Name": "emailSubjectErrors",
+					"Value": "Your virtual desktop cannot be started"
+				},
+				{
+					"_Comments": "E-mail body for other errors and alerts",
+					"Name": "emailBodyErrors",
+					"Value": "Your virtual desktop cannot be started at this moment. Please reach out to support@enstep.com for assistance."
+				},
+				{
+					"_Comments": "Maximum time in minutes that the server will wait for a new connection before allowing the server to be shut down.",
+					"Name": "ConnectionRequestTimeLimit",
+					"Value": "30"
+				}
+			]
+	}
+}
