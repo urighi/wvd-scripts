@@ -17,7 +17,12 @@ $Global:KeyPath = $CurrentPath
 
 #region ScriptConfig
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-# Imports stored credential handling script
+# Imports the stored credential handling script made by Paul Cunningham
+# Downloads latest version if it doesn't exist locally
+if (!(Test-Path $CurrentPath\Functions-PSStoredCredentials.ps1)) {
+    Invoke-WebRequest "https://raw.githubusercontent.com/cunninghamp/PowerShell-Stored-Credentials/master/Functions-PSStoredCredentials.ps1" `
+        -OutFile "$CurrentPath\Functions-PSStoredCredentials.ps1"
+}
 . $CurrentPath\Functions-PSStoredCredentials.ps1
 
 #endregion
