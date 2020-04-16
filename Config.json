@@ -76,6 +76,11 @@
 					"Value": "0.95"
 				},
 				{
+					"_Comments": "Maximum number of sessions per CPU during off-peak. If above the threshold, the not shut down the session hosts.",
+					"Name": "offPeakSessionThresholdPerCPU",
+					"Value": "1.95"
+				},
+				{
 					"_Comments": "Minimum number of host pool VMs to keep running during off-peak usage time. If set to 0, will shut down all servers without connected sessions.",
 					"Name": "minimumNumberOfRDSH",
 					"Value": "1"

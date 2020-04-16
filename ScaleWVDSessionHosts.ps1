@@ -256,8 +256,12 @@ function Start-OffPeakProcedure ($HostPoolInfo) {
         ((Get-SessionHostVMTags $_).$MaintenanceTagName -ne "true") -and
         ((Get-SessionHostVMTags $_).UserConnectionRequested -ne "true")}
 
+    # Calculates the number of sessions based on the off-peak threshold
+    $NumberOfSessions = ($AvailableSessionHosts.Sessions | Measure-Object -Sum).Sum
+    $SessionLimit = (Measure-AvailableCores $AvailableSessionHosts) * $offPeakSessionThresholdPerCPU
+
     Write-Log -Message "Number of available hosts: $($AvailableSessionHosts.Count)." -Category Information
-    while ($AvailableSessionHosts.Count -gt $MinimumNumberOfRDSH){
+    while (($AvailableSessionHosts.Count -gt $MinimumNumberOfRDSH) -and ($SessionLimit -gt $NumberOfSessions)){
         # Lists sessions
         $UserSessions = $HostPoolInfo | Get-RdsUserSession
 
@@ -310,14 +314,15 @@ function Start-OffPeakProcedure ($HostPoolInfo) {
             -HostPoolName $HostPoolInfo.HostPoolName | Where-Object { $_.Status -eq "Available" -and 
             ((Get-SessionHostVMTags $_).$MaintenanceTagName -ne "true") -and
             ((Get-SessionHostVMTags $_).UserConnectionRequested -ne "true")}
+
+        # Updates the number of sessions based on the off-peak threshold
+        $NumberOfSessions = ($AvailableSessionHosts.Sessions | Measure-Object -Sum).Sum
+        $SessionLimit = (Measure-AvailableCores $AvailableSessionHosts) * $offPeakSessionThresholdPerCPU
     }
     
     $Message = "No more hosts to shut down. Hosts available: $($AvailableSessionHosts.Count). " + `
     "Minimum number of hosts: $MinimumNumberOfRDSH."
     Write-Log -Message $Message -Category Information
-
-    $NumberOfSessions = ($AvailableSessionHosts.Sessions | Measure-Object -Sum).Sum
-    $SessionLimit = (Measure-AvailableCores $AvailableSessionHosts) * $SessionThresholdPerCPU
 
     if ($NumberOfSessions -gt $SessionLimit)
     {
