@@ -7,9 +7,11 @@ This script will scale the number of active session hosts based on time, day and
 * Ensures that online hosts have the status set to allow new sessions
 * Ensures that offline or in maintenance hosts have the status set to not allow new sessions
 * Updates the UserConnectionRequested and UserConnectionRequestDate Azure tags based on time (see MonitorUserConnectionAttempts.ps1)
+* Logs usage to a CSV file, and rotates log files
 * Checks if the host pool is on peak or off-peak hours
   * If the host pool is in peak hours:
     * Sets the host pool to BreadthFirst mode
+    * Checks the number of running cores against the minimum, and starts hosts as needed
     * Checks the number of users against a core/user threshold
     * If the number of connected users is above the threshold, starts a new session host
     * If the number is lower, does nothing
