@@ -4,13 +4,14 @@ ScaleWVDSessionHosts.ps1
 .NOTES
 Written by Ulisses Righi
 ulisses@righisoft.com.br
-Version 1.1 3/16/2020
+Version 1.2 4/20/2020
 #>
 
 #region Paths
 $CurrentPath = Split-Path $script:MyInvocation.MyCommand.Path
 $JsonPath = "$CurrentPath\Config.Json"
-$WVDTenantLog = "$CurrentPath\ScaleWVDSessionHosts.log"
+$WVDTenantLogPath = "$CurrentPath\ScaleWVDSessionHosts.log"
+$StatsPath = "$CurrentPath\WVDStats.csv"
 $Global:KeyPath = $CurrentPath
 
 #endregion
@@ -66,9 +67,41 @@ function Write-Log ([string]$Message,
     [string]$Category) {
     $DateTime = Get-Date -f "dd-MM-yyyy HH:mm:ss"
     $LogMessage = "$DateTime [$Category] $Message"
-    $LogMessage | Out-File -FilePath $WVDTenantLog -Append
+    $LogMessage | Out-File -FilePath $WVDTenantLogPath -Append
     Write-Host $LogMessage
 }
+
+
+function Reset-Log ($Path = $WVDTenantLogPath, $MaxSize = 1MB, $LogsToKeep = 10) {
+    $FolderPath = Split-Path $Path
+    $CurrentLog = Get-ChildItem -Path $Path
+    if ($CurrentLog.Length -gt $MaxSize) {
+        $CompressedPath = $Path.TrimEnd(".log") + (Get-Date -Format yyyy-MM-dd) + ".log.zip"
+        Compress-Archive -Path $Path -DestinationPath $CompressedPath
+        Remove-Item $Path -Force | Out-Null
+    }
+    $OldLogs = Get-ChildItem -Path $FolderPath -Filter "$($CurrentLog.BaseName)*.log.zip" | Sort-Object CreationTime
+
+    while ($OldLogs.Count -gt $LogsToKeep) {
+        Remove-Item $OldLogs[0]
+        $OldLogs = Get-ChildItem -Path $FolderPath -Filter "$($CurrentLog.BaseName)*.log.zip" | Sort-Object CreationTime
+    }
+}
+function Write-Stats ([string]$ServerName,
+    [string]$Status,
+    [string]$AllowNewSession,
+    [int]$TotalSessions) {
+    $DateTime = Get-Date -f "dd-MM-yyyy HH:mm:ss"
+    $ServerStats = [PSCustomObject]@{
+        "Time" = $DateTime
+        "ServerName" = $ServerName
+        "Status" = $Status
+        "AllowNewSession" = $AllowNewSession
+        "TotalSessions" = $TotalSessions
+    }
+    $ServerStats | Export-CSV -Path $StatsPath -Append -NoTypeInformation
+}
+
 
 #endregion
 
@@ -112,7 +145,7 @@ function Assert-SessionHostStatus ($SessionHosts) {
         }
 
         if ($Tags.$MaintenanceTagName -eq "true" -or
-            $SessionHost.Status -eq "NoHeartbeat") {
+            $SessionHost.Status -ne "Available") {
                 Write-Log -Message `
                 "Host $($SessionHost.SessionHostName) is offline or in maintenance mode. Setting it to not allow new sessions." -Category Warning
                 Set-RdsSessionHost -TenantName $TenantName -HostPoolName $HostPoolName `
@@ -260,6 +293,8 @@ function Start-OffPeakProcedure ($HostPoolInfo) {
     $NumberOfSessions = ($AvailableSessionHosts.Sessions | Measure-Object -Sum).Sum
     $SessionLimit = (Measure-AvailableCores $AvailableSessionHosts) * $offPeakSessionThresholdPerCPU
 
+    Write-Log -Message "Found $NumberOfSessions open sessions." -Category Information
+
     Write-Log -Message "Number of available hosts: $($AvailableSessionHosts.Count)." -Category Information
     while (($AvailableSessionHosts.Count -gt $MinimumNumberOfRDSH) -and ($SessionLimit -gt $NumberOfSessions)){
         # Lists sessions
@@ -353,10 +388,12 @@ function Start-PeakProcedure ($HostPoolInfo) {
 
     Write-Log -Message "Found $NumberOfSessions open sessions." -Category Information
 
-    while (($NumberOfSessions -gt $SessionLimit) -or ($AvailableCores -eq 0))
+    while (($NumberOfSessions -gt $SessionLimit) -or ($AvailableCores -eq 0) -or ($AvailableCores -lt $minimumNumberOfCores))
     {
+        # Possible values: Available / Disconnected / DomainTrustRelationshipLost / NoHeartbeat 
+        # NotJoinedToDomain / Shutdown / SxSStackListenerNotReady / Unavailable / UpgradeFailed / Upgrading
         # Finds offline session hosts and starts them
-        $SessionHost = $SessionHosts | Where-Object { $_.Status -eq "NoHeartbeat" -and 
+        $SessionHost = $SessionHosts | Where-Object { ($_.Status -eq "NoHeartbeat" -or $_.Status -eq "Shutdown" -or $_.Status -eq "Unavailable") -and 
             (Get-SessionHostVMTags $_).$MaintenanceTagName -ne "true" } | Select-Object -First 1
         if ($null -ne $SessionHost) {
             Start-SessionHost $SessionHost
@@ -378,6 +415,8 @@ function Start-PeakProcedure ($HostPoolInfo) {
 
  #region Main
 function Main {
+
+    Reset-Log
 
     Write-Log -Message "Starting WVD session host scaling script." -Category Information
 
@@ -426,6 +465,10 @@ function Main {
     if ($null -eq $AllSessionHosts) {
         Write-Log -Message "No session hosts found on '$HostpoolName'." -Category Information
         exit 1
+    }
+
+    foreach ($SessionHost in $AllSessionHosts) {
+        Write-Stats $SessionHost.SessionHostName $SessionHost.Status $SessionHost.AllowNewSession $SessionHost.Sessions
     }
     
     Assert-SessionHostStatus $AllSessionHosts
