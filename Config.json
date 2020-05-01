@@ -86,6 +86,11 @@
 					"Value": "1"
 				},
 				{
+					"_Comments": "Minimum number of cores to keep running during peak usage time.",
+					"Name": "minimumNumberOfCores",
+					"Value": "16"
+				},
+				{
 					"_Comments": "Maximum number of sessions per host (used on BreadthFirst mode).",
 					"Name": "maximumNumberOfSessions",
 					"Value": "9"
