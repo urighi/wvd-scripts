@@ -1,6 +1,8 @@
 # wvd-scripts
 Scripts for managing Windows Virtual Desktop.
-**New:** Support for the Spring 2020 Update.
+
+## What's new
+**New:** Added support for the Spring 2020 Update.
 
 ## Scaling scripts
 ### ScaleWVDSessionHosts.ps1
