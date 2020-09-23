@@ -2,7 +2,7 @@
 Scripts for managing Windows Virtual Desktop.
 
 ## What's new
-**New:** Added support for the Spring 2020 Update.
+**New:** Added support for the Spring 2020 Update. The ScaleWVDSessionHosts_SpringUpdate.ps1 and Config_SpringUpdate.json scripts use the Az.DesktopVirtualization module.
 
 ## Scaling scripts
 ### ScaleWVDSessionHosts.ps1
@@ -42,8 +42,9 @@ This script will scale the number of active session hosts based on time, day and
  
  #### Credentials
  Credentials for Azure and RDS are stored by using the Functions-PSStoredCredentials script available here: https://github.com/cunninghamp/PowerShell-Stored-Credentials
+ If you are using the Spring Update version, only the Azure credentials are needed.
  
- To store the credentials, run:
+ To store credentials, run:
  ```
  $KeyPath = "."
  . Functions-PSStoredCredentials.ps1
