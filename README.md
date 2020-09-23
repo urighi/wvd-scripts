@@ -1,5 +1,6 @@
 # wvd-scripts
 Scripts for managing Windows Virtual Desktop.
+**New:** Support for the Spring 2020 Update.
 
 ## Scaling scripts
 ### ScaleWVDSessionHosts.ps1
@@ -26,6 +27,7 @@ This script will scale the number of active session hosts based on time, day and
     * If the minimum of servers is set to 0, shuts down the last server as long as there are no open sessions, and that there is no pending user connection request (see MonitorUserConnectionAttempts.ps1) for a specified amount of time
  
  ### MonitorUserConnectionAttempts.ps1
+ ** This script is deprecated and kept here for reference only. ** Microsoft has removed RDS diagnostic logs. A new version is in development, supporting the Spring Update and Log Analytics.
  This script performs the following functions:
  * Detects user connection failures when hosts are offline, based on the RDS diagnostic logs
  * Starts a session host and updates the connection request tag in Azure with the current time
